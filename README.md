@@ -70,3 +70,5 @@ There are no commas, names should be in double quotes, and they are separated by
 Example 1: The filter "Fallout" will not filter out the game Fallout: New Vegas.
 
 Example 2: The filter "Fallout New Vegas" will not filter out any Fallout. Nor will it filter out the game it was intended to filter either, because the game is named "Fallout: New Vegas" and not "Fallout New Vegas".
+
+**NOTE: This script won't change autoupdate behavior for any Proton version, Steam Linux Runtimes, Steamworks Common Redistributables, or SteamVR. If you have these installed, then presumably you want them to stay updated.**
