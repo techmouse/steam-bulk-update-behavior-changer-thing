@@ -1,0 +1,145 @@
+#!/bin/bash
+#steam-bulk-update-behavior-changer
+#by: Mouse
+#Current build: Feb 12, 2023
+
+#filters:
+#you can add your own filters here for the game names or IDs you want ignored.
+#filters must be exact
+#in other words, they're case sensitive and each game name or ID must be written here exactly as it appears in the acf file/SteamDB/STDOUT of this script/etc.
+#example 1: the filter "Fallout" will not filter out the game Fallout: New Vegas
+#example 2: the filter "Fallout New Vegas" will not filter out any other Fallout. Nor will it filter out the game it was intended to filter either, because the formal name is "Fallout: New Vegas" and not "Fallout New Vegas"
+filter=("Steam Controller Configs" "0")
+
+isfiltered(){
+	y=false
+	for x in "${filter[@]}"; do
+		if [[ "$x" == "$1" ]]; then
+			y=true
+			break
+		fi
+	done
+	echo "$y"
+}
+
+string-substitute-all(){
+	echo "${1//$2/$3}"
+}
+
+string-tab(){
+	echo $'\t'
+}
+
+string-make-all-lowercase(){
+	echo "${@,,}"
+}
+
+echobehaviorlist(){
+	echo "0 for 'Always keep this game updated'. (Steam's default)"
+	echo "1 for 'Only update this game when I launch it'."
+	echo "2 for 'High Priority - Always auto-update this game before others'."
+}
+
+usage(){
+	echo "Usage: $0 [ \"steamapps directory\" ] [ 0 || 1 || 2 (optional) ]"
+	echo "This will automatically change how all games in a specific steamapps directory update."
+	echobehaviorlist
+	echo "This script will make backups of all acf files in the same directory before making changes."
+	echo "If something goes wrong, revert to the backup."
+	echo "This script won't change update behavior for Proton, Steam Linux Runtime, Steamworks Common Redistributables, SteamVR, and anything you add to the filter list."
+	echo "-h for this dialog."
+}
+
+changeautoupdate(){
+	counter=0
+	warnings=0
+	for file in "$thedir/"*".acf"; do
+		ID="$(basename "$file")"
+		if ! [[ "$ID" == *"-backup" ]]; then
+			ID="$(string-substitute-all "$ID" "appmanifest_" "")"
+			ID="$(string-substitute-all "$ID" ".acf" "")"
+			asdf="$(cat "$file")"
+			name="${asdf#*"\"name\"$(string-tab)$(string-tab)\""}"
+			name="${name%%"\""*}"
+			#filter out proton, steam, and user specified stuff. if you have these, then presumably you want them to stay updated. if not, you can always change it manually.
+			if [[ "$name" == "Proton "* ]] || [[ "$name" == "Steam Linux Runtime"* ]] || [[ "$name" == "Steamworks Common Redistributables"* ]] || [[ "$name" == "SteamVR"* ]] || [[ "$(isfiltered "$ID")" == "true" ]] || [[ "$(isfiltered "$name")" == "true" ]]; then
+				echo "Ignoring $name ($ID)."
+			else
+				if [[ "$1" == "doublecheck" ]]; then
+					if ! [[ "$asdf" == *"\"AutoUpdateBehavior\"$(string-tab)$(string-tab)\"$behavior\""* ]]; then
+						echo "WARNING: There was a problem setting behavior $behavior for $name ($ID). Investigate."
+						warnings="$((warnings+1))"
+					else
+						counter="$((counter+1))"
+					fi
+				else
+					#filter out games who's behavior is already set to $behavior
+					if [[ "$asdf" == *"\"AutoUpdateBehavior\"$(string-tab)$(string-tab)\"$behavior\""* ]]; then
+						echo "Behavior $behavior already set for $name ($ID). Skipping."
+					else
+						echo "Processing $name ($ID)"
+						if ! [[ -f "$file"-backup ]]; then
+							cp "$file" "$file"-backup
+						fi
+						x="$(string-substitute-all "$asdf" "\"AutoUpdateBehavior\"$(string-tab)$(string-tab)\"0\"" "\"AutoUpdateBehavior\"$(string-tab)$(string-tab)\"$behavior\"")"
+						x="$(string-substitute-all "$x" "\"AutoUpdateBehavior\"$(string-tab)$(string-tab)\"1\"" "\"AutoUpdateBehavior\"$(string-tab)$(string-tab)\"$behavior\"")"
+						x="$(string-substitute-all "$x" "\"AutoUpdateBehavior\"$(string-tab)$(string-tab)\"2\"" "\"AutoUpdateBehavior\"$(string-tab)$(string-tab)\"$behavior\"")"
+						echo "$x" > "$file"
+						counter="$((counter+1))"
+					fi
+				fi
+			fi
+		fi
+	done
+}
+
+if (( $# >= 1 )); then
+	while getopts "h" OPTION; do
+		case "${OPTION}" in
+			h)
+				usage
+				exit
+				;;
+			\?)
+				exit
+				;;
+		esac
+	done
+	shift "$((OPTIND -1))"
+
+	thedir="$(realpath "$1")"
+	if ! [[ -d "$thedir" ]]; then
+		echo "Invalid directory. Exiting."
+		exit
+	fi
+	if [[ "$(string-make-all-lowercase "$(basename "$thedir")")" == "steamapps" ]]; then
+		if (( $# == 2 )); then
+			behavior="$2"
+		else
+			echo "What behavior?"
+			echobehaviorlist
+			read -e behavior
+		fi
+		if [[ "$behavior" == 0 ]] || [[ "$behavior" == 1 ]] || [[ "$behavior" == 2 ]]; then
+			changeautoupdate
+			attempts="$counter"
+			changeautoupdate "doublecheck"
+			echo "Done!"
+			echo "$attempts out of $counter entries successfully changed."
+			if ((warnings > 0)); then
+				echo "$warnings critical failure(s). These must be resolved manually. This script isn't programmed for it."
+			fi
+			echo "Steam must be restarted before any changes will be applied."
+		else
+			echo "Invalid behavior selected. Cancelling."
+		fi
+
+	else
+		echo "ERROR: steamapps directory not found."
+		echo "Ensure you are supplying a valid steamapps directory."
+		echo "Exiting."
+	fi
+
+else
+	usage
+fi
